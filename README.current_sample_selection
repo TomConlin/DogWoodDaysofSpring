@@ -1,0 +1,209 @@
+
+Current sample selection.
+
+Kristin isolated non-clones within several kilometers of clones in R-lang
+and posted a CSV file in our NPN GH repo.
+
+Our approaches differed in that I concentrated on Spring observations
+and she sensibly choose fewer types covering a greater proportion of each year.
+
+```
+ xsv headers clonal_dogwoods/data/initial_clones_nonclones_dogwood.csv
+1   
+2   unique_id
+3   clone_id
+4   nonclone_id
+5   X
+6   observation_id
+7   update_datetime
+8   site_id
+9   latitude
+10  longitude
+11  elevation_in_meters
+12  state
+13  species_id
+14  genus
+15  species
+16  common_name
+17  kingdom
+18  individual_id
+19  phenophase_id
+20  phenophase_description
+21  observation_date
+22  year.y
+23  month
+24  day
+25  day_of_year
+26  phenophase_status
+27  intensity_category_id
+28  intensity_value
+29  abundance_value
+30  gdd
+31  gddf
+32  tmax_winter
+33  tmax_spring
+34  tmax_summer
+35  tmax_fall
+36  tmax
+37  tmaxf
+38  tmin_winter
+39  tmin_spring
+40  tmin_summer
+41  tmin_fall
+42  tmin
+43  tminf
+44  prcp_winter
+45  prcp_spring
+46  prcp_summer
+47  prcp_fall
+48  prcp
+49  acc_prcp
+50  daylength
+51  n_clones
+52  clone
+53  y_points
+
+```
+
+
+source/dest
+
+```
+FRM="/home/tomc/Projects/GenoPhenoEnvo/GitHub/NPN-Data/clonal_dogwoods/data"
+SQL="/data/Projects/GenoPhenoEnvo/DogWoodDaysofSpring/SQL"
+NAME="initial_clones_nonclones_dogwood"
+
+echo "drop table if exists $NAME; create table $NAME (" >	$SQL/create_table_/create_table_$NAME.sql
+xsv stats $FRM/$NAME.csv | xsv select 1,2 | tr "[A-Z,]" "[a-z ]" | sed '1d;s/$/ ,/;s/^/\t/;s/unicode/text/' >> $SQL/create_table_$NAME.sql
+	echo ");" >> $SQL/create_table_$NAME.sql
+
+
+```
+
+Add a postgis geom/geog column
+```
+alter table initial_clones_nonclones_dogwood add column location geometry(Point,4326);
+update initial_clones_nonclones_dogwood set location = ST_SetSRID(ST_MakePoint(longitude,latitude),4326);
+UPDATE 93
+
+```
+
+
+See that all the clones anchor sites are distinct
+
+```
+with dist as (
+   select ST_Distance(a.location,b.location) d 
+   from initial_clones_nonclones_dogwood a, initial_clones_nonclones_dogwood b 
+   where a.common_name = 'Appalachian Spring dogwood'
+  and b.common_name = 'Appalachian Spring dogwood'
+     and a.individual_id != b.individual_id
+ ) select min(d), avg(d), max(d) from dist
+;
+        min         |        avg        |        max         
+--------------------+-------------------+--------------------
+ 0.4159672812433731 | 5.772260127371204 | 12.619494149826458
+
+```
+the units are degrees  (which vary in size) 
+
+Here at 45N lat a degree is about 100km further south it is more; 
+so the closest anchor clone sites are several dozens of miles apart.
+
+
+We know the samples are chosen to be within several km of their anchors 
+
+
+
+Supplement the anchors and samples with prism_id and prism_type
+
+```
+select distinct 
+  individual_id,
+  clone_id anchor,
+  nonclone_id sample,
+  ac.site_id,
+  prism.gid prism_id,
+  prism.gridcode prism_type
+ 
+  from initial_clones_nonclones_dogwood ac
+  join int_loc_zone on ac.site_id = int_loc_zone.site_id
+  join phm_us_shp prism on prism.gid = int_loc_zone.gid
+  order by anchor,ac.site_id,prism_id
+;
+
+ individual_id | anchor | sample | site_id | prism_id | prism_type 
+---------------+--------+--------+---------+----------+------------
+         25240 |  25240 | NA     |    8408 |    85627 |         12
+         29437 |  25240 | 29437  |    8836 |    93953 |         13
+         29445 |  25240 | 29445  |    8836 |    93953 |         13
+         29865 |  25240 | 29865  |    8897 |    85627 |         12
+         29866 |  25240 | 29866  |    8897 |    85627 |         12
+
+         68961 |  68961 | NA     |   17740 |    93953 |         13
+         76890 |  68961 | 76890  |   19211 |    93953 |         13
+         76897 |  68961 | 76897  |   19211 |    93953 |         13
+         76905 |  68961 | 76905  |   19211 |    93953 |         13
+         76911 |  68961 | 76911  |   19211 |    93953 |         13
+         85182 |  68961 | 85182  |   19211 |    93953 |         13
+        115062 |  68961 | 115062 |   24264 |    93953 |         13
+
+         69520 |  69520 | NA     |    1330 |    82915 |         13
+        161120 |  69520 | 161120 |   25686 |    82915 |         13
+        161121 |  69520 | 161121 |   25686 |    82915 |         13
+
+         71499 |  71499 | NA     |   10150 |    96595 |         14
+        117213 |  71499 | 117213 |   24736 |    96595 |         14
+        117385 |  71499 | 117385 |   24773 |    96595 |         14
+
+         73092 |  73092 | NA     |   18491 |    90180 |         12
+        117268 |  73092 | 117268 |   18491 |    90180 |         12
+        117269 |  73092 | 117269 |   18491 |    90180 |         12
+        117270 |  73092 | 117270 |   18491 |    90180 |         12
+        117271 |  73092 | 117271 |   18491 |    90180 |         12
+        117272 |  73092 | 117272 |   18491 |    90180 |         12
+
+         66520 |  73412 | 66520  |    1668 |    82915 |         13
+         66509 |  73412 | 66509  |    2119 |    82915 |         13
+         66513 |  73412 | 66513  |    2120 |    82915 |         13
+         73392 |  73412 | 73392  |   18536 |    82915 |         13
+         73402 |  73412 | 73402  |   18537 |    82915 |         13
+         73412 |  73412 | NA     |   18537 |    82915 |         13
+         73420 |  73412 | 73420  |   18537 |    82915 |         13
+
+         63313 |  74290 | 63313  |   16673 |    90180 |         12
+         66419 |  74290 | 66419  |   17272 |    90180 |         12
+         74319 |  74290 | 74319  |   18644 |    90180 |         12
+         74290 |  74290 | NA     |   18656 |    90180 |         12
+         74305 |  74290 | 74305  |   18670 |    90180 |         12
+
+         64882 | 126735 | 64882  |   17048 |    96841 |         15
+         80942 | 126735 | 80942  |   19902 |    96841 |         15
+         85078 | 126735 | 85078  |   20256 |    96841 |         15
+        126735 | 126735 | NA     |   25658 |    96841 |         15
+        129704 | 126735 | 129704 |   26053 |    96841 |         15
+        132273 | 126735 | 132273 |   26213 |    96841 |         15
+        131587 | 126735 | 131587 |   26226 |    96841 |         15
+        131707 | 126735 | 131707 |   26285 |    96841 |         15
+        177268 | 229765 | 177268 |   32356 |    96841 |         15
+        229760 | 229765 | 229760 |   36923 |    96841 |         15
+        229761 | 229765 | 229761 |   36923 |    96841 |         15
+        229763 | 229765 | 229763 |   36925 |    96841 |         15
+        229765 | 229765 | NA     |   36995 |    96841 |         15
+
+        132682 | 250718 | 132682 |   22720 |    60003 |         12
+        132691 | 250718 | 132691 |   22720 |    60003 |         12
+        187111 | 250718 | 187111 |   22720 |    60003 |         12
+        187112 | 250718 | 187112 |   22720 |    60003 |         12
+        250718 | 250718 | NA     |   40944 |    60003 |         12
+(54 rows)
+
+```
+
+
+
+
+
+
+
+

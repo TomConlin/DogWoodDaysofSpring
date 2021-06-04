@@ -1,0 +1,384 @@
+# 2021 May 10
+
+
+select site_id,latitude,longitude 
+  from dogwood_spp 
+  where common_name = 'Appalachian Spring dogwood'
+;
+-- 2884 rows
+
+select distinct site_id,latitude,longitude 
+  from dogwood_spp 
+  where common_name = 'Appalachian Spring dogwood'
+;
+--  124 rows
+
+
+select distinct site_id
+  from dogwood_spp 
+  where common_name = 'Appalachian Spring dogwood'
+;
+--  124 rows
+
+select distinct latitude,longitude 
+  from dogwood_spp 
+  where common_name = 'Appalachian Spring dogwood'
+;
+--  123 rows
+-- copy that
+
+copy( 
+select distinct longitude, latitude 
+  from dogwood_spp 
+  where common_name = 'Appalachian Spring dogwood' 
+) 
+to 'clone_lonlat.tsv' with delimiter as e'\t'
+;
+
+
+-- not super user so 
+-- swap the trailing semicolon for a leading backslash and loose the line breaks
+
+\copy (select distinct longitude, latitude from dogwood_spp where common_name = 'Appalachian Spring dogwood' order by 1,2 ) to 'clone_lonlat.tsv' with delimiter as e'\t'
+
+\copy (select distinct longitude, latitude from dogwood_spp where common_name != 'Appalachian Spring dogwood' order by 1,2) to 'nonclone_lonlat.tsv' with delimiter as e'\t'
+
+-- note 18 locations in common between clone and non-clone per
+-- comm -12 <(sort clone_lonlat.tsv) <(sort nonclone_lonlat.tsv)
+
+
+-- note: One clone location has two site_ids.
+
+select latitude,longitude --,  site_id
+  from dogwood_spp 
+  where common_name = 'Appalachian Spring dogwood'
+   group by 1,2
+   having count(distinct site_id) > 1	
+;
+
+ latitude  | longitude 
+-----------+-----------
+ 39.930405 | -94.83091
+
+select  distinct site_id
+  from dogwood_spp 
+  where common_name = 'Appalachian Spring dogwood'
+    and latitude  = 39.930405 
+    and longitude = -94.83091
+;
+ site_id 
+---------
+   10725
+   18123
+
+# If these are two individuals they should be a great test case.
+
+select distinct Elevation_in_Meters
+  from dogwood_spp 
+  where common_name = 'Appalachian Spring dogwood'
+    and latitude  = 39.930405 
+    and longitude = -94.83091
+;
+ elevation_in_meters 
+---------------------
+                 326
+                 328
+
+-- six foot vertical difference I will ignore
+
+
+select distinct individual_id      
+  from dogwood_spp 
+  where common_name = 'Appalachian Spring dogwood'
+    and latitude  = 39.930405 
+    and longitude = -94.83091
+;
+ individual_id 
+---------------
+         71115
+        119522
+
+-- this works. 
+
+
+-- I wonder if there are  others reported as a single site with multiple individuals 
+
+select latitude,longitude
+  from dogwood_spp 
+  where common_name = 'Appalachian Spring dogwood'
+   group by 1,2
+   having count(distinct individual_id) > 1	
+;
+
+-- ooooh good!  49 rows. (if they overlap in time & observation type)
+-- this and the 18 non-clone locations that coincide with clone locations 
+-- are the basis of a great base case
+
+
+select latitude,longitude,phenophase_id,first_yes_year,first_yes_doy, count(individual_id)idv
+  from dogwood_spp 
+  where common_name = 'Appalachian Spring dogwood'
+   group by 1,2,3,4,5
+   having count(distinct individual_id) > 1	
+;
+
+-- gives 360 rows where different clones in the same place at the same time
+-- reported the same behavior to the day 
+-- This does fail to disprove the null hypnosis (Exists data to support null hypnosis)
+-- but also filters out all that may disagree. 
+
+
+-- if there is variance what does it look like?
+
+select latitude,longitude,phenophase_id, first_yes_year,
+	round(avg(first_yes_doy)) mean, round(stddev(first_yes_doy)) var
+  from dogwood_spp 
+  where common_name = 'Appalachian Spring dogwood'
+   group by 1,2,3,4
+   having count(distinct individual_id) > 1	
+      and round(stddev(first_yes_doy)) > 0
+;
+113 rows where there is variance in clone behavior in the same time and place
+-- some may be sloppy reporting (which could also matter on the plus side) 
+-- but having over four month standard deviation for the same event is problematic.
+
+
+with tmp as (
+select latitude,longitude,phenophase_id, first_yes_year, round(avg(first_yes_doy)) mean,
+ round(stddev(first_yes_doy)) var
+  from dogwood_spp 
+  where common_name = 'Appalachian Spring dogwood'
+   group by 1,2,3,4
+   having count(distinct individual_id) > 1	
+      -- and round(stddev(first_yes_doy)) > 0
+) select round(avg(var)),round(stddev(var)) from tmp --order by 1
+;
+
+-- variation of the variation is 10 +/- 25 
+-- getting the v of v to never go negative is a good goal for trimming outliers
+
+copy (
+with tmp as (
+select latitude, longitude,phenophase_id, first_yes_year, 
+	round(avg(first_yes_doy)) mean, 
+ 	round(stddev(first_yes_doy)) var
+  from dogwood_spp 
+  where common_name = 'Appalachian Spring dogwood'
+   group by 1,2,3,4
+   having count(distinct individual_id) > 1 
+) select var from tmp order by 1) to STDOUT
+;
+
+-- Otsu's gives 41 as a threshold to try ; which eliminates ~17 instances.
+
+
+with tmp as (
+select latitude,longitude,phenophase_id, first_yes_year, round(avg(first_yes_doy)) mean,
+ round(stddev(first_yes_doy)) var
+  from dogwood_spp 
+  where common_name = 'Appalachian Spring dogwood'
+   group by 1,2,3,4
+   having count(distinct individual_id) > 1	
+      and round(stddev(first_yes_doy)) <= 41
+) select round(avg(var)),round(stddev(var)) from tmp --order by 1
+;
+
+-- which brings it to 4 +/- 8 which is better 
+-- but not as good as I had hoped on the low side
+
+Call it under two weeks for most all observations.
+
+If we limit it to just first&full  for leaf&flower observations 
+is it more consistent?
+
+
+with tmp as (
+select latitude,longitude,phenophase_id, first_yes_year, round(avg(first_yes_doy)) mean,
+ round(stddev(first_yes_doy)) var
+  from dogwood_spp 
+  where common_name = 'Appalachian Spring dogwood'
+	and phenophase_id in (371,483,500,501)
+   group by 1,2,3,4
+   having count(distinct individual_id) > 1	
+     and round(stddev(first_yes_doy)) <= 41   
+) select round(avg(var)),round(stddev(var)) from tmp --order by 1
+;
+
+no. makes it a couple of days worse.
+applying the previous cutoff lowers variation-of-variation by a day
+
+-- check for new threshold
+
+copy (
+with tmp as (
+select latitude, longitude,phenophase_id, first_yes_year, 
+	round(avg(first_yes_doy)) mean, 
+ 	round(stddev(first_yes_doy)) var
+  from dogwood_spp 
+  where common_name = 'Appalachian Spring dogwood'
+	and phenophase_id in (371,483,500,501)
+   group by 1,2,3,4
+   having count(distinct individual_id) > 1 
+) select var from tmp order by 1) to STDOUT
+;
+
+-- outlier threshold is down to 37
+
+with tmp as (
+select latitude,longitude,phenophase_id, first_yes_year, round(avg(first_yes_doy)) mean,
+ round(stddev(first_yes_doy)) var
+  from dogwood_spp 
+  where common_name = 'Appalachian Spring dogwood'
+	and phenophase_id in (371,483,500,501)
+   group by 1,2,3,4
+   having count(distinct individual_id) > 1	
+     --and round(stddev(first_yes_doy)) < 37  
+) select min(var), max(var), round(avg(var)) av,round(stddev(var)) sd , count(*) 
+  from tmp
+;
+
+-- 3 +/- 6
+
+-- looks like "usually the same week, always with four weeks" 
+--  is likely as good as this dataset is going to get.
+
+
+-- without trimming outliers
+
+ min | max | av | sd | count 
+-----+-----+----+----+-------
+   0 | 144 | 10 | 27 |   163
+
+
+-- with trimming the 13 that are 37 or more days off
+ min | max | av | sd | count 
+-----+-----+----+----+-------
+   0 |  28 |  3 |  6 |   150
+
+-------------------------------------------------------------
+
+
+With a baseline for how closely clones are expected to behave
+bring in any local non-clones.
+
+Non-clones to consider will need to share
+latitude,longitude,phenophase_id,first_yes_year with a common-clone.
+
+
+with cc as (
+select latitude,longitude,phenophase_id, first_yes_year,round(avg(first_yes_doy))ccdoy
+  from dogwood_spp 
+  where common_name = 'Appalachian Spring dogwood'
+	and phenophase_id in (371,483,500,501)
+   group by 1,2,3,4
+   having count(distinct individual_id) > 1	
+) 
+select 
+	nc.latitude,
+	nc.longitude,
+	nc.individual_id,
+	nc.phenophase_id,
+	nc.first_yes_year,
+	nc.first_yes_doy, ccdoy-nc.first_yes_doy as delta
+  from dogwood_spp as nc
+  join  cc 
+ 	on  nc.latitude = cc.latitude 
+	and nc.longitude = cc.longitude 
+	and nc.phenophase_id = cc.phenophase_id 
+	and nc.first_yes_year = cc.first_yes_year 
+  where nc.common_name != 'Appalachian Spring dogwood'
+order by 1,2,5,4
+;
+
+ latitude  | longitude  | individual_id | phenophase_id | first_yes_year | first_yes_doy | delta 
+-----------+------------+---------------+---------------+----------------+---------------+-------
+ 33.942989 | -83.374893 |         85078 |           371 |           2017 |            85 |     6
+ 33.942989 | -83.374893 |         85078 |           483 |           2017 |            85 |     6
+ 33.942989 | -83.374893 |         85078 |           500 |           2017 |            76 |     9
+ 33.942989 | -83.374893 |         85078 |           501 |           2017 |            85 |    12
+
+  33.94368 | -83.373207 |         80942 |           371 |           2017 |            85 |     3
+  33.94368 | -83.373207 |         80942 |           371 |           2017 |            69 |    19
+  33.94368 | -83.373207 |         80942 |           483 |           2017 |            85 |     3
+  33.94368 | -83.373207 |         80942 |           483 |           2017 |            72 |    16
+
+ 34.291664 |  -85.63031 |         37124 |           371 |           2013 |            64 |     5
+
+ 35.708954 |  -82.61364 |         65713 |           371 |           2014 |           114 |    46
+ 35.708954 |  -82.61364 |         65713 |           371 |           2014 |           103 |    57
+ 35.708954 |  -82.61364 |         65713 |           371 |           2014 |           143 |    17
+ 35.708954 |  -82.61364 |         65713 |           483 |           2014 |           119 |    12
+
+ 43.078892 | -85.627914 |         20068 |           371 |           2014 |           127 |    -4
+ 43.078892 | -85.627914 |         20068 |           371 |           2014 |           106 |    17
+ 43.078892 | -85.627914 |         20068 |           483 |           2014 |           146 |    41
+ 43.078892 | -85.627914 |         20068 |           371 |           2015 |           111 |     0
+ 43.078892 | -85.627914 |         20068 |           483 |           2015 |           124 |     0
+ 43.078892 | -85.627914 |         20068 |           371 |           2016 |           113 |     0
+ 43.078892 | -85.627914 |         20068 |           483 |           2016 |           120 |     0
+ 43.078892 | -85.627914 |         20068 |           371 |           2017 |           110 |     4
+ 43.078892 | -85.627914 |         20068 |           483 |           2017 |           134 |     0
+ 43.078892 | -85.627914 |         20068 |           371 |           2018 |           123 |     0
+ 43.078892 | -85.627914 |         20068 |           371 |           2019 |           124 |     8
+(24 rows)
+
+
+from which we can guess our common clones are the late bloomers since the delta 
+is mostly positive which indicates they followed in reported phenophase
+
+Just about half observations are within the week window of fudge which counts as close enough 
+to count as the same time as it could have been if it had the same clone genotype.
+
+From what we have, the five non-clone individuals which we have reports 
+at the same exact location of "more-than-one individual clone" 
+
+ - in 2017 '85078' was about a week early
+
+ - in 2017 '80942' has four reports two of which are likely typed incorrectly
+	(is that flower and leaf not correctly differentiated?)
+
+
+ - in 2013 '37124' is nominally in sync with our clones 
+
+ - in 2014 '65713' somehow had "first" leaf bud reported 8,7 & 2 weeks before our clones.
+
+ - in 2014 '20068' started earlier than our clones but in the subsequent three years 
+	it was spot on 
+
+
+so a several of non-clones adjacent to clones have no significant difference
+a couple have probable data quality issues and might be better than they look.
+
+Recall these location "points" are likely accurate to about half a football field
+sized patch and are before any attempt to make sensible neighborhoods around our common clones.
+
+
+If we relax the constraint of there being more than one clone 
+at the exact location of the non-clone 
+(that was more for establishing a nominal clone phenophase window)
+we can get   141   observations of non-clones alongside a clone .... 
+seeing one with a phenophase delta of 8 months
+
+maybe time for a brief foray into data quality
+
+Question: Is there a partial order available for the phenophases? 
+NPN does have a data quality section ... 
+
+I may have to do a bit more looking at the first yes/no stuff
+my understanding that the clones are in someones yard 
+and they are reporting on their own plant they got explicitly to report on 
+but that might not be the whole picture.
+
+although I may be able to tease out chains of (trivial) leaf partial order  
+and another one for flowers
+it does not look like  I should expect to find any order between the two
+(maybe a dogwood specialist could come up with a few specific rules of thumb but meh)  
+
+so I should redo collapsing to min times for yes observations 
+as later ones could just be when someone else happens to wander by.
+
+I could also look at the 'no's and time to last y/n to help reality check the yes's.
+
+
+
+

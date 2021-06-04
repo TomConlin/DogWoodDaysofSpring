@@ -1,0 +1,613 @@
+### Postgres/PostGIS
+
+Check if suitable db exists yer
+
+	psql --list
+
+nope.
+
+    sudo -u postgres createdb gpe
+    echo "CREATE EXTENSION postgis;" | sudo -u postgres psql gpe
+	echo "CREATE EXTENSION postgis_raster;" | sudo -u postgres psql gpe
+
+
+yep.
+
+
+ 	sudo -u postgres createuser --no-inherit --pwprompt qgis
+
+	echo "GRANT SELECT ON ALL TABLES IN SCHEMA public TO qgis;" | sudo -u postgres psql gpe	
+	echo "GRANT USAGE ON SCHEMA public TO qgis;" | sudo -u postgres psql gpe
+	echo "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO qgis;" | sudo -u postgres psql gpe
+
+
+#### Starting with the dogwood specific file NPN made for Bryan
+
+source
+```
+FRM="/home/tomc/Projects/GenoPhenoEnvo/GitHub/NPN-Data"
+```
+
+```
+xsv headers $FRM/dogwood_spp_4-27-21.csv
+1   Site_ID
+2   Latitude
+3   Longitude
+4   Elevation_in_Meters
+5   State
+6   Species_ID
+7   Genus
+8   Species
+9   Common_Name
+10  Kingdom
+11  Individual_ID
+12  Phenophase_ID
+13  Phenophase_Description
+14  First_Yes_Year
+15  First_Yes_Month
+16  First_Yes_Day
+17  First_Yes_DOY
+18  First_Yes_Julian_Date
+19  NumDays_Since_Prior_No
+20  Last_Yes_Year
+21  Last_Yes_Month
+22  Last_Yes_Day
+23  Last_Yes_DOY
+24  Last_Yes_Julian_Date
+25  NumDays_Until_Next_No
+
+xsv select Common_Name $FRM/dogwood_spp_4-27-21.csv | dist
+
+  11961 flowering dogwood
+   2884 Appalachian Spring dogwood
+   2136 redosier dogwood
+   1413 Kousa dogwood
+   1301 bunchberry dogwood
+   1174 gray dogwood
+    224 Pacific dogwood
+    194 alternateleaf dogwood
+    158 roughleaf dogwood
+     38 roundleaf dogwood
+     27 stiff dogwood
+     13 Asiatic dogwood
+      1 Common_Name 
+```
+
+~3k app-sp-clones & 4x-6x non-clones
+
+
+destination
+```
+SQL="/home/tomc/Projects/GenoPhenoEnvo/Climate/SQL"
+```
+
+get column labels and datatypes make a skeleton of a create table sql statement;
+
+```
+	echo "create table dogwood_spp (" >	$SQL/create_table_dogwood_spp.sql
+    xsv stats $FRM/dogwood_spp_4-27-21.csv | xsv select 1,2 | tr "[A-Z,]" "[a-z ]" | sed '1d;s/$/ ,/;s/^/\t/;s/unicode/text/' >> $SQL/create_table_dogwood_spp.sql
+	echo ");" >> $SQL/create_table_dogwood_spp.sql
+```
+
+    cat $SQL/create_table_dogwood_spp.sql
+
+looks okay. edit:  
+	remove final comma , make lat & lon postgis fields, not nulls index ...
+
+
+
+```SQL
+select count(distinct location) 
+ from dogwood_spp where common_name = 'Appalachian Spring dogwood' ;
+
+```
+
+123 distinct clone locations and
+872 distinct non-clone locations
+
+------------------------------------------------------
+
+#### Plant Hardiness Zone shapefile
+
+4269 (NAD83)  PRISM reports as
+4326 (WGS84)  loaded clones as
+
+Try:
+
+```
+shp2pgsql -I -s 4269  Prism_Plant_Hardiness/phm_us_shp > Prism_Plant_Hardiness/phm_us_shp.sql  
+```
+
+Shapefile type: Polygon
+Postgis type: MULTIPOLYGON[2]
+
+maybe!
+
+```
+ls -lh  Prism_Plant_Hardiness/phm_us_shp.sql
+-rw-rw-r-- 1 tomc tomc 83M May  3 21:43 Prism_Plant_Hardiness/phm_us_shp.sql
+```
+
+psql gpe < Prism_Plant_Hardiness/phm_us_shp.sql
+
+it loads
+
+```SQL
+select count(*) from phm_us_shp; 
+ count 
+-------
+ 97161
+```
+
+that is alot of zones,
+
+note: 
+there are 19 temp-range zone __types__  from -45 to 50  in five degree (F) increments
+labeled
+[2b,3a,3b,4a...10b,11a,11b]
+see:  `select distinct zone from phm_us_shp;` 
+
+
+Filter to only keep zones with individual locations in them,
+
+```
+-- Convert zone ...   oh so slow 
+select count(phm_us_shp.*)
+from dogwood_spp, phm_us_shp
+where ST_Intersects(location, ST_SetSRID(geom,4326))
+;
+-- kill
+
+
+-- Convert points instead
+
+select distinct site_id, gid 
+into int_loc_zone
+from dogwood_spp, phm_us_shp
+where ST_Intersects(ST_SetSRID(location,4269), geom);
+
+SELECT 995
+Time: 49883.497 ms (00:49.88)
+
+select count(distinct gid) zone from int_loc_zone ;
+ zone 
+-------
+    84     
+
+
+create index int_loc_zone_site_id_idx on int_loc_zone using btree(site_id);
+create index int_loc_zone_gid_idx on int_loc_zone using btree(gid);
+
+```
+
+84 zones with at least one individual in it (out of 90k zones)
+visually, some of these zones are quite large for my taste
+and may need to be broken down further (lots of thoughts for how) 
+
+
+what is the zone occupancy of clone & non-clone individuals? 
+
+```
+select count(distinct gid)clonezone 
+ from int_loc_zone ilz
+ join  dogwood_spp dw on ilz.site_id = dw.site_id
+where common_name = 'Appalachian Spring dogwood'
+;
+clonezone 
+-----------
+        21
+
+select count(distinct gid)nonclonezone 
+ from int_loc_zone ilz
+ join  dogwood_spp dw on ilz.site_id = dw.site_id
+where common_name != 'Appalachian Spring dogwood'
+;
+ nonclonezone 
+--------------
+           79
+```
+
+by which we can see there must be _atleast_ 16 zones with both clones & non-clones
+locations.
+
+Find zones with multiple clone locations.
+
+```
+
+select  gid clonezone, count(distinct location) location
+ from int_loc_zone ilz
+ join  dogwood_spp dw on ilz.site_id = dw.site_id
+where common_name = 'Appalachian Spring dogwood'
+group by gid
+having count(distinct location) > 1
+order by 2 desc
+;
+
+ clonezone | location 
+-----------+-------
+     90180 |    22
+     96841 |    16
+     96595 |    12
+     84999 |    12
+     82915 |     9
+     97008 |     8
+     93953 |     8
+     97132 |     6
+     69962 |     6
+     54035 |     6
+     97036 |     5
+     85627 |     3
+     84461 |     2
+(13 rows)
+
+
+```
+
+clones in these 13 zones should be
+	- sanity checked for being plausibly belonging together
+	- checked for phenophase concordnance
+
+(remember there must eight more zones each with a single clone ~location~ in it)
+
+
+
+
+select  gid clonezone,
+ 	--Individual_ID,
+	Phenophase_ID,
+	Phenophase_Description,
+	First_Yes_Year,
+	--First_Yes_Month,
+	--First_Yes_Day,
+	--First_Yes_DOY,
+	variance(First_Yes_Julian_Date) y_variance,
+	avg(NumDays_Since_Prior_No) last_n,
+	Last_Yes_Year,
+	--Last_Yes_Month,
+	--Last_Yes_Day,
+ 	--Last_Yes_DOY,
+	variance(Last_Yes_Julian_Date) n_vatiance,
+	avg(NumDays_Until_Next_No) next_n
+
+ from int_loc_zone ilz
+ join  dogwood_spp dw on ilz.site_id = dw.site_id
+where dw.common_name = 'Appalachian Spring dogwood'
+ and gid in (     
+	90180,
+    96841,
+    96595,
+    84999,
+    82915,
+    97008,
+    93953,
+    97132,
+    69962,
+    54035,
+    97036,
+    85627,
+    84461)
+group by 1,2,3,4,7
+order by 1,2
+;
+
+
+ahh. perhaps not sufficent restrictions. need to check they overlap in time as well
+also there are phenophases we may not require yet.
+
+```
+select count(*)hwomany, Phenophase_ID, Phenophase_Description
+ from dogwood_spp dw
+where dw.common_name = 'Appalachian Spring dogwood'
+group by 2,3 order by 1 desc
+;
+ hwomany | phenophase_id |       phenophase_description       
+---------+---------------+------------------------------------
+     594 |           483 | Leaves
+     576 |           471 | Falling leaves
+     548 |           371 | Breaking leaf buds
+     490 |           467 | Increasing leaf size
+     382 |           498 | Colored leaves
+     123 |           500 | Flowers or flower buds
+     121 |           501 | Open flowers
+      23 |           516 | Fruits
+      12 |           504 | Recent fruit or seed drop
+      12 |           390 | Ripe fruits
+       1 |           182 | All leaves colored (deciduous)
+       1 |           183 | >=50% of leaves fallen (deciduous)
+       1 |           184 | All leaves fallen (deciduous
+
+```
+
+So  'Breaking leaf buds', 'Leaves', 'Flowers or flower buds' and 'Open flowers'
+
+seem most relevent (371,483,500,501)
+
+
+
+```
+select  distinct gid clonezone, first_yes_year as year--, count(distinct location) howmany
+ from int_loc_zone ilz
+ join  dogwood_spp dw on ilz.site_id = dw.site_id
+where common_name = 'Appalachian Spring dogwood'
+ and phenophase_id in (371,483,500,501)
+group by clonezone,year
+having count(distinct location) > 1
+order by 1 desc
+;
+```
+
+75  zone-years with between two and fourteen observations
+
+```
+select  distinct gid clonezone --, first_yes_year as year, count(distinct location) howmany
+ from int_loc_zone ilz
+ join  dogwood_spp dw on ilz.site_id = dw.site_id
+where common_name = 'Appalachian Spring dogwood'
+ and phenophase_id in (371,483,500,501)
+group by clonezone     
+having count(distinct location) > 1
+having count(distinct first_yes_year) = 1
+order by 1 desc
+;
+ clonezone 
+-----------
+     97132
+     97036
+     97008
+     96841
+     96595
+     93953
+     90180
+     85627
+     84999
+     84461
+     82915
+     69962
+     54035
+
+looks like we still keep all thirteen zones 
+when we consider time and observation types which is good/lucky.
+
+Again, visually just looking at the clone locations in these 13 zones 
+my only concern is the zones may be too big; especially east-west.
+But this is not an informed opinion.
+
+
+So within a zone for a particular year, 
+generate some stats for timing of the available observations on the clones.
+(stick with day of year)
+
+zoneid, zonetype, year,
+green_avg, green_stddev, 
+leaf_avg, leaf_stddev, 
+bud_avg, bud_stddev, 
+flower_avg, flower_stddev
+
+
+```
+
+select  pus.gid zoneid, zone zonetype, first_yes_year as year,  phenophase_id, phenophase_description,
+    avg(first_yes_doy) yes_avg, stddev(first_yes_doy) yes_stddev, 
+    avg(last_yes_doy) no_avg,  stddev(last_yes_doy) no_stddev
+into clones_zones_doy_stats
+
+ from int_loc_zone ilz
+ join  dogwood_spp dw on ilz.site_id = dw.site_id
+ join phm_us_shp pus on ilz.gid = pus.gid
+where common_name = 'Appalachian Spring dogwood'
+  and phenophase_id  = 371
+group by 1,2,3,4,5
+having count(distinct location) > 1
+union
+select  pus.gid , zone, first_yes_year,  phenophase_id, phenophase_description,
+    avg(first_yes_doy)yes_avg, stddev(first_yes_doy)yes_stddev, 
+    avg(last_yes_doy) no_avg,  stddev(last_yes_doy) no_stddev
+
+ from int_loc_zone ilz
+ join  dogwood_spp dw on ilz.site_id = dw.site_id
+ join phm_us_shp pus on ilz.gid = pus.gid
+where common_name = 'Appalachian Spring dogwood'
+  and phenophase_id  = 483
+group by 1,2,3,4,5
+having count(distinct location) > 1
+union
+select  pus.gid, zone, first_yes_year,  phenophase_id, phenophase_description,
+    avg(first_yes_doy)yes_avg, stddev(first_yes_doy)yes_stddev, 
+    avg(last_yes_doy) no_avg,  stddev(last_yes_doy) no_stddev
+
+ from int_loc_zone ilz
+ join  dogwood_spp dw on ilz.site_id = dw.site_id
+ join phm_us_shp pus on ilz.gid = pus.gid
+where common_name = 'Appalachian Spring dogwood'
+  and phenophase_id  = 500
+group by 1,2,3,4,5
+having count(distinct location) > 1
+union
+select  pus.gid, zone , first_yes_year,  phenophase_id, phenophase_description,
+    avg(first_yes_doy)yes_avg, stddev(first_yes_doy)yes_stddev, 
+    avg(last_yes_doy) no_avg,  stddev(last_yes_doy) no_stddev
+
+ from int_loc_zone ilz
+ join  dogwood_spp dw on ilz.site_id = dw.site_id
+ join phm_us_shp pus on ilz.gid = pus.gid
+where common_name = 'Appalachian Spring dogwood'
+  and phenophase_id  = 501
+group by 1,2,3,4,5
+having count(distinct location) > 1
+;
+
+
+```
+
+168 consolidated observation times on >1clones per zone and year
+
+
+Quick peek at what kinds of numbers we might expect
+
+days (from newyear) to greening per type of zone
+
+#### Leaves
+```
+select zonetype, round(avg(yes_avg)) doy, round(avg(yes_stddev)) plusminus
+ from clones_zones_doy_stats 
+ where phenophase_id = 371
+group by zonetype order by zonetype
+;
+     zonetype     | doy | plusminus 
+------------------+-----+-----------
+ 5b: -15 to -10 F | 123 |         9
+ 6a: -10 to -5 F  | 104 |         6
+ 6b: -5 to 0 F    | 105 |        22
+ 7a: 0 to 5 F     |  95 |        14
+ 7b: 5 to 10 F    |  87 |         8
+ 8a: 10 to 15 F   | 110 |        38
+ 8b: 15 to 20 F   | 114 |        24
+ 9a: 20 to 25 F   | 101 |        46
+ 9b: 25 to 30 F   |  72 |         3
+(9 rows)
+
+
+select zonetype, round(avg(yes_avg)) doy, round(avg(yes_stddev)) plusminus
+ from clones_zones_doy_stats 
+ where phenophase_id = 483
+group by zonetype order by zonetype
+;
+
+     zonetype     | doy | plusminus 
+------------------+-----+-----------
+ 5b: -15 to -10 F | 139 |        13
+ 6a: -10 to -5 F  | 117 |        12
+ 6b: -5 to 0 F    | 121 |        28
+ 7a: 0 to 5 F     | 127 |        38
+ 7b: 5 to 10 F    | 121 |        48
+ 8a: 10 to 15 F   |  89 |        31
+ 8b: 15 to 20 F   | 121 |        13
+ 9a: 20 to 25 F   | 120 |         9
+ 9b: 25 to 30 F   | 236 |        85
+(9 rows)
+```
+
+the 9b zonetype looks pretty useless with this arrangement 
+
+
+#### Flowers
+```
+select zonetype, round(avg(yes_avg)) doy, round(avg(yes_stddev)) plusminus
+ from clones_zones_doy_stats 
+ where phenophase_id = 500
+group by zonetype order by zonetype
+;
+    zonetype     | doy | plusminus 
+-----------------+-----+-----------
+ 6a: -10 to -5 F | 129 |        76
+ 6b: -5 to 0 F   | 130 |        41
+ 7a: 0 to 5 F    | 109 |        43
+ 7b: 5 to 10 F   |  78 |        11
+ 8a: 10 to 15 F  | 102 |        24
+
+
+select zonetype, round(avg(yes_avg)) doy, round(avg(yes_stddev)) plusminus
+ from clones_zones_doy_stats 
+ where phenophase_id = 501
+group by zonetype order by zonetype
+;
+    zonetype     | doy | plusminus 
+-----------------+-----+-----------
+ 6a: -10 to -5 F | 112 |         8
+ 6b: -5 to 0 F   | 111 |        10
+ 7a: 0 to 5 F    | 103 |         5
+ 7b: 5 to 10 F   | 106 |         6
+ 8a: 10 to 15 F  |  97 |         4
+```
+
+
+timings from cool to warm zones is consistant enough
+
+Not getting warm fuzzies on the average ordering of bud then bloom.
+variance means it is possible but averages show it is sub optimal 
+
+Also the variance is often far to high to be useful... when it is most of a season  
+but this aggregates by zonetype not by zone 
+so (some) variance could only go down (a bit) from here.
+
+e.g. 
+select zoneid, round(avg(yes_avg)) doy, round(avg(yes_stddev)) plusminus
+ from clones_zones_doy_stats 
+ where phenophase_id = 500
+group by 1 order by 1 ;
+
+... splits one zonetype into two zones ... big whoop.
+
+
+So here I find on one hand I feel the zones are too wide 
+and admit too much variance within them 
+and on the other hand have to scrounge for a dozen zones 
+with more than one clone in them.
+
+I could complete this exercise if asked, and may anyway 
+but relying the results smacks of desperation.
+
+Look for non-clones within the same zones that exceed a stddev 
+for the same phenophase that year.
+
+Ann would like to seem them 
+and to maybe look at by zonetype instead of zone 
+althought the regions will be too large to be useful at that point. 
+
+
+-----------------------------------------------------------------------
+
+Aside (or maybe not)
+
+A different approach could say since the clones are expected to have the same genotypes 
+then any expresing the same phenotypes in time may indicate they belong grouped together
+in space.  
+Letting the clones anchor their own zones
+
+this will not scale large (US or even state scale)  
+feels more like looking for microclimates...
+Maybe zipcodes. these trees are all apt to be in peoples yards.
+I can supposedly get some past weather from zip codes.
+
+https://www.climate.gov/maps-data/dataset/past-weather-zip-code-data-table
+
+-----------------------------------------------------------------------
+Ryan suggested we may be able to use remote sensing data to fill in gaps
+Tyson clairifies it is problematic, single tree is too small 
+but a grove could work.  being that these clones are most apt to be in a residential 
+area (someones yard) I would expect all sorts of counfounding transiant visual noise.
+
+but we can fetch stacks of different flavored pixles from each clone location
+and see if any of it helps with defining areas such that if a clone were planted there 
+we could resonably expect it's phenophases to be in sync with others nearby
+(nominaly the same times) 
+But these clone-areas also needs to be large enough 
+that they can contanin non0clones whih may have a differnnt phenophase.
+
+
+Another thing to test is if  neighboring clones have different phenophases 
+and we find no variation in the background to account then it will not bode well 
+for our results. (i.e Ryan suggested  soil bacteria matters most)
+
+And in a yard/garden watering and fertilizer may skew things up.
+And urban/suburban heat islands and microclimates and oh my.
+
+
+
+-------------------------------------------------------------------------------
+
+
+For any of this to have any hope, the premise that clones reared at the same time, 
+in a common neighborhood (whatever that comes to mean) with their common 
+genotypes within common enviroment  __MUST__  exibit common(-ish) phenotype/phenophase. 
+
+
+So do the closest pairs clones have common phenophase?
+
+Move to `./README.premise_test`. 
+
+
+
+
+
+

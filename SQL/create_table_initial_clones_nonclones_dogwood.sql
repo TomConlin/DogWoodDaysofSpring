@@ -1,0 +1,63 @@
+drop table if exists initial_clones_nonclones_dogwood; 
+create table initial_clones_nonclones_dogwood (
+	rid integer ,
+	unique_id text ,
+	clone_id integer ,
+	nonclone_id text ,
+	x integer ,
+	observation_id integer ,
+	update_datetime text ,
+	site_id integer ,
+	latitude float ,
+	longitude float ,
+	elevation_in_meters integer ,
+	state text ,
+	species_id integer ,
+	genus text ,
+	species text ,
+	common_name text ,
+	kingdom text ,
+	individual_id integer ,
+	phenophase_id integer ,
+	phenophase_description text ,
+	observation_date text ,
+	year_y integer ,
+	month integer ,
+	day integer ,
+	day_of_year integer ,
+	phenophase_status integer ,
+	intensity_category_id integer ,
+	intensity_value text ,
+	abundance_value integer ,
+	gdd float ,
+	gddf float ,
+	tmax_winter float ,
+	tmax_spring float ,
+	tmax_summer float ,
+	tmax_fall float ,
+	tmax float ,
+	tmaxf float ,
+	tmin_winter float ,
+	tmin_spring float ,
+	tmin_summer float ,
+	tmin_fall float ,
+	tmin float ,
+	tminf float ,
+	prcp_winter integer ,
+	prcp_spring integer ,
+	prcp_summer integer ,
+	prcp_fall integer ,
+	prcp integer ,
+	acc_prcp integer ,
+	daylength integer ,
+	n_clones integer ,
+	clone text ,
+	y_points float 
+);
+
+\! echo "Populate table"
+
+\copy initial_clones_nonclones_dogwood from '/home/tomc/Projects/GenoPhenoEnvo/GitHub/NPN-Data/clonal_dogwoods/data/initial_clones_nonclones_dogwood.csv' CSV HEADER
+
+
+
