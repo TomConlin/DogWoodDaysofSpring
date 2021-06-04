@@ -8,8 +8,14 @@ are the  plain text  READMEs I tend to generate for myself in passing.
 [Climate/README_backfill.txt](Climate/README_backfill.txt)  was the first thing
 I looked into when Bryan posted the Dogwood data. Seemed having climate data
 going back covering older phenophase reports could help train the ML.
-It is not left in a horible state, the full season values should  usable if need be
-but it does not stop and provide the partial accumulations on day of observation.
+
+A quicj clance at the locations needing backfilled climate data
+![Climate/location_1957-2007.png](Climate/location_1957-2007.png)
+
+It is not left in a horible state, but it is not none.
+The full season values should usable if need be (only back to 1980)
+but it does not stop and provide the partial accumulations
+on day of an observation.
 
 [README.postgis](README.postgis)  is about setting up postgres/postgis
 to hold the various datasets (COUNT focused) & qgis to visualize it.
@@ -33,11 +39,13 @@ Augmented their results with the Prism data I had ready.
 says about our basic premise but with slightly different assumptions
 (first individual report instead of average of reports
  and a slightly different set of particular phenophases).
-This doc is drifting off into data interpertation questions
+This doc is drifting off into data interpertation questions.
 
-There is a image generated there of the distribution of phenophase reports over "day of year"
+Here is a image generated there of the distribution of phenophase reports over "day of year"
+for  flower/bud (purple), leaf(green) and  'colored leaf' (brown)
 ![phenophase-doy_individual_count.png](phenophase-doy_individual_count.png)
 
 
 
-There is a WorldClim in process
+
+There is a WorldClim (raster) load in process, just elevation in so far
