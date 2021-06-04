@@ -9,16 +9,19 @@ are the  plain text  READMEs I tend to generate for myself in passing.
 I looked into when Bryan posted the Dogwood data. Seemed having climate data
 going back covering older phenophase reports could help train the ML.
 
+note: there is a forked repo [Climate/daymet-single-pixel-batch](https://github.com/TomConlin/daymet-single-pixel-batch)
+with the daymet pixle stack puller I wrotre after considering theirs.
+
 A quick glance at the locations needing backfilled climate data
 ![Climate/location_1957-2007.png](Climate/location_1957-2007.png)
 
-It is not left in a horible state, but it is not done.
+It is not left in a horible state (okay maybe it is), but it is not done .
 The full season values should usable if need be (only back to 1980)
 but it does not stop and provide the partial accumulations
-on day of an observation.
+on each day of an observation.
 
 [README.postgis](README.postgis)  is about setting up postgres/postgis
-to hold the various datasets (COUNT focused) & qgis to visualize it.
+to hold the various geographic datasets (CONTUS focused) & qgis to visualize it.
 Starts with loading in the PRISM plant hardyness index as vector shapefiles
 to provide a quasi-static climate summary.
 
