@@ -9,10 +9,10 @@ are the  plain text  READMEs I tend to generate for myself in passing.
 I looked into when Bryan posted the Dogwood data. Seemed having climate data
 going back covering older phenophase reports could help train the ML.
 
-A quicj clance at the locations needing backfilled climate data
+A quick glance at the locations needing backfilled climate data
 ![Climate/location_1957-2007.png](Climate/location_1957-2007.png)
 
-It is not left in a horible state, but it is not none.
+It is not left in a horible state, but it is not done.
 The full season values should usable if need be (only back to 1980)
 but it does not stop and provide the partial accumulations
 on day of an observation.
@@ -48,4 +48,4 @@ for  flower/bud (purple), leaf(green) and  'colored leaf' (brown)
 
 
 
-There is a WorldClim (raster) load in process, just elevation in so far
+There is a WorldClim (raster) load in process, just elevation in so far.
